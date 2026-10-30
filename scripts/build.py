@@ -36,10 +36,17 @@ DOCKER_LIST = "application/vnd.docker.distribution.manifest.list.v2+json"
 RAW_URL = "https://raw.githubusercontent.com/kernelorg/mikrotik-apps/main/apps.yaml"
 
 
+TAG_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")  # формат тега OCI
+
+
 def http_json(url, headers=None):
     req = urllib.request.Request(url, headers=headers or {})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.load(resp)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.load(resp)
+    except urllib.error.HTTPError as e:
+        body = e.read(300).decode("utf-8", "replace").strip()
+        sys.exit(f"HTTP {e.code} for {url}\n{body}")
 
 
 def latest_release(repo):
@@ -56,13 +63,25 @@ def registry_archs(image, tag):
     host, _, path = image.partition("/")
     token_url = f"https://{host}/token?scope=repository:{path}:pull&service={host}"
     try:
-        token = http_json(token_url)["token"]
-    except (urllib.error.HTTPError, KeyError):
+        req = urllib.request.Request(token_url)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            token = json.load(resp).get("token")
+    except (urllib.error.HTTPError, ValueError):
         token = None
     headers = {"Accept": f"{OCI_INDEX},{DOCKER_LIST}"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    manifest = http_json(f"https://{host}/v2/{path}/manifests/{urllib.parse.quote(tag)}", headers)
+    manifest_url = f"https://{host}/v2/{path}/manifests/{urllib.parse.quote(tag, safe='')}"
+    req = urllib.request.Request(manifest_url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            manifest = json.load(resp)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            tags = http_json(f"https://{host}/v2/{path}/tags/list", headers).get("tags", [])
+            sys.exit(f"{image}:{tag} not found in registry; available tags: {', '.join(sorted(tags))}")
+        body = e.read(300).decode("utf-8", "replace").strip()
+        sys.exit(f"HTTP {e.code} for {manifest_url}\n{body}")
     archs = set()
     for m in manifest.get("manifests", []):
         p = m.get("platform") or {}
@@ -100,7 +119,12 @@ def main():
     ap.add_argument("--check", action="store_true", help="только проверить, apps.yaml не писать")
     ap.add_argument("--output", default=str(ROOT / "apps.yaml"))
     args = ap.parse_args()
-    pins = dict(p.split("=", 1) for p in args.pin)
+    pins = {}
+    for p in args.pin:
+        if "=" not in p:
+            sys.exit(f"--pin expects NAME=TAG, got {p!r}")
+        k, v = p.split("=", 1)
+        pins[k.strip()] = v.strip()  # пробелы из поля ввода workflow не должны попадать в тег
 
     sources = yaml.safe_load((ROOT / "sources.yaml").read_text(encoding="utf-8"))
     items = []
@@ -118,6 +142,9 @@ def main():
             tag = src.get("tag", "{version}").format(version=re.sub(r"^v", "", release))
             origin = f"release {release} of {src['release']}"
 
+        if not TAG_RE.match(tag):
+            sys.exit(f"{name}: invalid image tag {tag!r} (from {origin})")
+        print(f"{name}: checking {src['image']}:{tag} ({origin})")
         archs = registry_archs(src["image"], tag)
         missing = set(src.get("archs", [])) - archs
         if missing:

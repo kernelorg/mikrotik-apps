@@ -33,9 +33,11 @@ jobs:
       - name: Build apps.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PIN: ${{ inputs.pin }}
         run: |
           args=()
-          if [ -n "${{ inputs.pin }}" ]; then args+=(--pin "${{ inputs.pin }}"); fi
+          pin="$(printf '%s' "$PIN" | xargs)"   # обрезать случайные пробелы
+          if [ -n "$pin" ]; then args+=(--pin "$pin"); fi
           python3 scripts/build.py "${args[@]}"
 
       - name: Show diff

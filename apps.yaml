@@ -56,7 +56,7 @@
 
   services:
     mosquitto:
-      image: ghcr.io/kernelorg/mosquitto-go-auth-radius:3.6.0
+      image: ghcr.io/kernelorg/mosquitto-go-auth-radius:3.7.0
       container_name: mosquitto-go-auth
       restart: unless-stopped
       ports:
