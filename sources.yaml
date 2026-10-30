@@ -1,0 +1,14 @@
+# Откуда брать версии для приложений. Используется scripts/build.py.
+#
+#   file     — файл приложения в apps/ (один YAML-документ = одно приложение);
+#   release  — репозиторий GitHub, чей последний релиз (releases/latest)
+#              определяет версию;
+#   image    — образ в registry, у которого должен существовать тег версии;
+#   tag      — шаблон тега образа; {version} = тег релиза без ведущей "v";
+#   archs    — архитектуры, которые обязаны присутствовать в манифесте образа.
+apps:
+  - file: apps/mosquitto-go-auth.yaml
+    release: kernelorg/mosquitto-go-auth
+    image: ghcr.io/kernelorg/mosquitto-go-auth-radius
+    tag: "{version}"
+    archs: [arm64]

@@ -1,0 +1,80 @@
+# Файл собран автоматически скриптом scripts/build.py. Не редактируйте вручную:
+# правьте apps/*.yaml и sources.yaml, затем запустите сборку.
+# URL для роутера: /app/settings set app-store-urls="https://raw.githubusercontent.com/kernelorg/mikrotik-apps/main/apps.yaml"
+
+- name: mosquitto-go-auth
+  descr: Mosquitto MQTT broker with the mosquitto-go-auth plugin. Authenticates clients against RADIUS (MikroTik User Manager, FreeRADIUS) with per-user and per-group topic ACLs. MQTT on 1883, MQTT over WebSockets on 9001, MQTT over TLS on 8883 (enable in the config).
+  page: https://github.com/kernelorg/mosquitto-go-auth
+  category: networking
+  icon: https://mosquitto.org/images/mosquitto-text-side-28.png
+  default-credentials: ""
+  auto-update: false
+  supported-archs:
+    - arm64
+
+  configs:
+    # Настройки плагина. Поменяйте адрес RADIUS-сервера и shared secret.
+    go_auth_conf:
+      content: |
+        auth_plugin /mosquitto/go-auth.so
+        auth_opt_log_level info
+
+        auth_opt_backends radius
+        # Адрес и порт RADIUS-сервера (MikroTik User Manager слушает 1812/udp).
+        auth_opt_radius_servers 192.168.88.1:1812
+        auth_opt_radius_secret changeme
+        auth_opt_radius_nas_identifier mosquitto
+        auth_opt_radius_require_message_authenticator false
+        auth_opt_radius_superuser_attr Mikrotik-Group
+        auth_opt_radius_superuser_value mqtt-superuser
+        auth_opt_radius_acl_attr Filter-Id
+        auth_opt_radius_group_attr Mikrotik-Group
+        auth_opt_radius_acl_file /mosquitto/config/conf.d/radius-groups.acl
+        auth_opt_radius_acl_default deny
+    # Групповые ACL (группы берутся из атрибута Mikrotik-Group в Access-Accept).
+    # Разрешены только комментарии на отдельной строке: "#" также wildcard MQTT.
+    radius_groups_acl:
+      content: |
+        topic read broadcast/#
+
+        group sensors
+        topic readwrite sensors/%u/#
+        topic read status/#
+    # Дополнительные listener'ы. 1883 уже объявлен в mosquitto.conf образа.
+    listeners_conf:
+      content: |
+        # MQTT over WebSockets
+        listener 9001
+        protocol websockets
+
+        # MQTT over TLS: положите сертификаты в том certs (/mosquitto/certs)
+        # и раскомментируйте строки ниже.
+        #listener 8883
+        #cafile /mosquitto/certs/ca.crt
+        #certfile /mosquitto/certs/server.crt
+        #keyfile /mosquitto/certs/server.key
+
+  services:
+    mosquitto:
+      image: ghcr.io/kernelorg/mosquitto-go-auth-radius:3.6.0
+      container_name: mosquitto-go-auth
+      restart: unless-stopped
+      ports:
+        - 1883:1883:mqtt
+        - 8883:8883:mqtts
+        - 9001:9001:mqtt-ws
+      volumes:
+        # certs: сертификаты для listener 8883 (ca.crt, server.crt, server.key),
+        # см. конфиг 20-listeners.conf. data: persistence-база, если включите.
+        - certs:/mosquitto/certs
+        - data:/mosquitto/data
+      configs:
+        - source: go_auth_conf
+          target: /mosquitto/config/conf.d/go-auth.conf
+          mode: 0644
+        - source: radius_groups_acl
+          target: /mosquitto/config/conf.d/radius-groups.acl
+          mode: 0644
+        - source: listeners_conf
+          target: /mosquitto/config/conf.d/20-listeners.conf
+          mode: 0644

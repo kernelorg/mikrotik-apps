@@ -1,0 +1,54 @@
+# Пересборка apps.yaml. Запускается ТОЛЬКО вручную кнопкой "Run workflow"
+# (Actions -> Build app store -> Run workflow). Никаких триггеров по
+# расписанию, push или событиям других репозиториев.
+name: Build app store
+
+on:
+  workflow_dispatch:
+    inputs:
+      pin:
+        description: 'Зафиксировать версию, например mosquitto-go-auth=3.6.0 (пусто = последний релиз)'
+        required: false
+        default: ''
+      commit:
+        description: 'Закоммитить и запушить apps.yaml в main'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pip install pyyaml
+
+      - name: Build apps.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          args=()
+          if [ -n "${{ inputs.pin }}" ]; then args+=(--pin "${{ inputs.pin }}"); fi
+          python3 scripts/build.py "${args[@]}"
+
+      - name: Show diff
+        run: git --no-pager diff --stat; git --no-pager diff apps.yaml | head -100
+
+      - name: Commit and push
+        if: ${{ inputs.commit }}
+        run: |
+          if git diff --quiet apps.yaml; then
+            echo "apps.yaml не изменился"; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps.yaml
+          git commit -m "Rebuild apps.yaml (manual run)"
+          git push
